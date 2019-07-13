@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>admin</title>
+  <link href="https://cdn.bootcss.com/normalize/8.0.1/normalize.css" rel="stylesheet">
+  <link href="https://cdn.bootcss.com/element-ui/2.10.1/theme-chalk/index.css" rel="stylesheet">
+</head>
+<body>
+  <div id="app" style="padding: 20px;">
+    <div>
+      <el-upload
+        :action="actionUrl"
+        :http-request="beforeUpload"
+        :show-file-list="false"
+        name="video"
+        accept="video/mp4"
+      >
+        <el-button v-show="uploadStep !== 1" type="success">{{ uploadButtonText }}</el-button>
+        <div slot="tip" class="el-upload__tip">{{ form.video_uri }}</div>
+      </el-upload>
+      <el-progress v-show="uploadStep === 1" :text-inside="true" :stroke-width="18" :percentage="percentage" status="success"></el-progress>
+      <video id="videoPlay" ref="videoPlay" :src="form.video_uri | uriFilter" style="display: none"></video>
+    </div>
+  </div>
+  <script src="https://cdn.bootcss.com/vue/2.6.10/vue.min.js"></script>
+  <script src="https://cdn.bootcss.com/element-ui/2.10.1/index.js"></script>
+  <script src="https://cdn.bootcss.com/axios/0.19.0-beta.1/axios.min.js"></script>
+  <script>
+    new Vue({
+      el: '#app',
+      data() {
+        return {
+          isLeave: false,
+          actionUrl: 'https://chifan.vipzp.top/restaurant-pc/api/oss/getUploadSign/video',
+          percentage: 0,
+          uploadStep: 0,
+          fileName: '',
+          form: {},
+          cancel() {}
+        }
+      },
+      computed: {
+        uploadButtonText() {
+          if (this.uploadStep === 2) {
+            return '重新上传'
+          } else {
+            return '上传视频'
+          }
+        }
+      },
+      filters: {
+        uriFilter (uri) {
+          if (uri) {
+            return /^[a-z][a-z0-9+.-]*:/.test(uri) ? uri : 'https://oss.rjfs.fun/' + uri
+          } else {
+            return ''
+          }
+        }
+      },
+      beforeDestroy() {
+        this.isLeave = true
+        this.cancel()
+        if (this.setDuration) {
+          clearInterval(this.setDuration)
+        }
+      },
+      methods: {
+        uploadRequest(file) {
+          this.uploadStep = 1
+          this.fileName = file.name
+          axios.get(this.actionUrl).then(res => {
+            const data = res.data
+            const _this = this
+            const form = new FormData()
+            const key = data.dir + new Date().getTime() + '.mp4'
+            form.append('name', file.name)
+            form.append('key', key)
+            form.append('policy', data.policy)
+            form.append('OSSAccessKeyId', data.accessid)
+            form.append('success_action_status', 200)
+            form.append('callback', data.callback)
+            form.append('signature', data.signature)
+            form.append('file', file)
+            axios.post(data.host, form, {
+              onUploadProgress(progressEvent) {
+                if (progressEvent.lengthComputable) {
+                  const complete = (progressEvent.loaded / progressEvent.total * 100)
+                  _this.percentage = parseInt(complete)
+                }
+              },
+              cancelToken: new axios.CancelToken(function executor(c) {
+                // executor 函数接收一个 cancel 函数作为参数
+                _this.cancel = c
+              })
+            }).then(res => {
+              if (this.isLeave) return
+              this.onSuccess(res.data.data)
+            }).catch(() => {
+              this.uploadStep = 0
+              if (this.isLeave) {
+                this.$message.info('已取消上传')
+              } else {
+                this.$message.error('上传失败')
+              }
+            })
+          }).catch(() => {
+            this.uploadStep = 0
+            if (this.isLeave) {
+              this.$message.info('已取消上传')
+            } else {
+              this.$message.error('上传失败')
+            }
+          })
+        },
+        onSuccess(data) {
+          this.form.video_uri = data.filePath
+          this.form.job_id = data.jobId
+          this.$forceUpdate()
+          this.setDuration = setInterval(() => {
+            if (this.$refs.videoPlay.duration) {
+              this.uploadStep = 2
+              this.form.duration = this.$refs.videoPlay.duration
+              this.$emit('upload-success', this.form)
+              clearInterval(this.setDuration)
+            }
+          }, 300)
+        },
+        beforeUpload(e) {
+          if (e.file.type !== 'video/mp4') {
+            this.$message.error('请上传MP4格式文件')
+          } else if (e.file.size > (1024 * 1024 * 1024)) {
+            this.$message.error('视频文件最大不能超过1GB')
+          } else {
+            if (this.uploadStep === 2) {
+              this.$emit('reset-video-form')
+            }
+            this.percentage = 0
+            this.uploadRequest(e.file)
+          }
+        }
+      }
+    })
+  </script>
+</body>
+</html>
